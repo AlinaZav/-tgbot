@@ -15,7 +15,7 @@ app.listen(PORT, () => {
 const TelegramBot = require('node-telegram-bot-api');
 
 // Получаем токен из переменной окружения (НЕ храним в коде!)
-const token = process.env.BOT_TOKEN;
+const token = process.env.TOKEN;
 
 if (!token) {
   console.error("❌ BOT_TOKEN не задан. Добавьте переменную окружения в Koyeb.");
