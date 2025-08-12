@@ -1,24 +1,37 @@
+// Запускаем мини-веб-сервер, чтобы Koyeb видел, что бот жив
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 8000;
+
+app.get('/', (req, res) => {
+  res.send('Bot is running!');
+});
+
+app.listen(PORT, () => {
+  console.log(`Web server running on port ${PORT}`);
+});
+
+// Telegram bot
 const TelegramBot = require('node-telegram-bot-api');
 
-// Получаем токен из переменной окружения
-const token = process.env.TOKEN;
+// Получаем токен из переменной окружения (НЕ храним в коде!)
+const token = process.env.BOT_TOKEN;
 
 if (!token) {
-    console.error("❌ Ошибка: токен не предоставлен! Установите переменную окружения TOKEN.");
-    process.exit(1); // Останавливаем выполнение
+  console.error("❌ BOT_TOKEN не задан. Добавьте переменную окружения в Koyeb.");
+  process.exit(1);
 }
 
 const bot = new TelegramBot(token, { polling: true });
 
-// ID админов
 const ADMINS = [5202993972];
-
 let acceptingRequests = true;
 const userData = {};
 const submittedChecks = new Set();
 const pendingRejections = {};
-const activeRequests = new Set(); // Храним пользователей с активной заявкой
+const activeRequests = {};
 
+// Главное меню
 function sendMainMenu(chatId) {
     bot.sendMessage(chatId, 'Выберите тип заявки:', {
         reply_markup: {
@@ -32,18 +45,18 @@ function sendMainMenu(chatId) {
     });
 }
 
-// Открыть приём заявок
+// Открыть заявки
 bot.onText(/\/open/, (msg) => {
     if (!ADMINS.includes(msg.from.id)) return;
     acceptingRequests = true;
     bot.sendMessage(msg.chat.id, '✅ Бот снова доступен!');
 });
 
-// Закрыть приём заявок
+// Закрыть заявки
 bot.onText(/\/close/, (msg) => {
     if (!ADMINS.includes(msg.from.id)) return;
     acceptingRequests = false;
-    bot.sendMessage(msg.chat.id, '⛔ Бот временно не работает по техническим причинам.');
+    bot.sendMessage(msg.chat.id, '⛔ Приём заявок закрыт.');
 });
 
 // Старт
@@ -51,7 +64,7 @@ bot.onText(/\/start/, (msg) => {
     sendMainMenu(msg.chat.id);
 });
 
-// Обработка сообщений
+// Логика бота
 bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
@@ -60,42 +73,31 @@ bot.on('message', (msg) => {
     if (pendingRejections[chatId]) {
         const targetUser = pendingRejections[chatId];
         bot.sendMessage(targetUser, `❌ Отказано: ${text}`);
-        bot.sendMessage(chatId, 'Причина отказа отправлена водителю.');
-        activeRequests.delete(targetUser); // Разблокируем пользователя
+        bot.sendMessage(chatId, 'Причина отказа отправлена.');
         delete pendingRejections[chatId];
         return;
     }
 
-    // Блокируем создание новой заявки, если у пользователя уже есть активная
-    if (activeRequests.has(chatId) && !userData[chatId] && ['Простой', 'Перепробег', 'Отказ от доставки'].includes(text) === false) {
-        bot.sendMessage(chatId, '⛔ У вас уже есть активная заявка. Дождитесь обработки.');
+    // Если пользователь уже имеет активную заявку
+    if (activeRequests[chatId]) {
+        bot.sendMessage(chatId, '⛔ Вы уже отправили заявку. Дождитесь её обработки.');
         return;
     }
 
-    // Автоматически показываем меню, если бот не в режиме диалога
-    if (!userData[chatId] && !['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
-        sendMainMenu(chatId);
-        return;
-    }
-
+    // Если бот закрыт
     if (!acceptingRequests && !ADMINS.includes(msg.from.id)) {
         bot.sendMessage(chatId, '⛔ Приём заявок сейчас закрыт.');
         return;
     }
 
-    // Если пользователь выбрал тип заявки
+    // Если пользователь выбирает тип
     if (['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
-        if (activeRequests.has(chatId)) {
-            bot.sendMessage(chatId, '⛔ У вас уже есть активная заявка.');
-            return;
-        }
         userData[chatId] = { type: text, step: 1 };
-        activeRequests.add(chatId); // Запоминаем, что у него активная заявка
-        bot.sendMessage(chatId, 'Введите дату закрытия рейса (В формате ДД.ММ.ГГГГ):');
+        bot.sendMessage(chatId, 'Введите дату закрытия рейса (ДД.ММ.ГГГГ):');
         return;
     }
 
-    // Обработка шагов заполнения
+    // Заполнение заявки
     if (userData[chatId]) {
         const step = userData[chatId].step;
         const type = userData[chatId].type;
@@ -103,12 +105,11 @@ bot.on('message', (msg) => {
         if (step === 1) {
             userData[chatId].date = text;
             userData[chatId].step++;
-            bot.sendMessage(chatId, 'Введите номер товарного чека (Полностью):');
+            bot.sendMessage(chatId, 'Введите номер товарного чека:');
         } else if (step === 2) {
             if (submittedChecks.has(text.toUpperCase())) {
                 bot.sendMessage(chatId, '⛔ Такая заявка уже существует!');
                 delete userData[chatId];
-                activeRequests.delete(chatId);
                 sendMainMenu(chatId);
                 return;
             }
@@ -117,24 +118,26 @@ bot.on('message', (msg) => {
 
             if (type === 'Простой') {
                 userData[chatId].step++;
-                bot.sendMessage(chatId, 'Введите время прибытия на адрес (В формате ЧЧ:ММ):');
+                bot.sendMessage(chatId, 'Введите время прибытия (ЧЧ:ММ):');
             } else {
+                activeRequests[chatId] = true;
                 sendRequestToAdmin(chatId, msg.from);
                 delete userData[chatId];
             }
         } else if (step === 3 && type === 'Простой') {
             userData[chatId].arrival = text;
             userData[chatId].step++;
-            bot.sendMessage(chatId, 'Введите время убытия с адреса (В формате ЧЧ:ММ):');
+            bot.sendMessage(chatId, 'Введите время убытия (ЧЧ:ММ):');
         } else if (step === 4 && type === 'Простой') {
             userData[chatId].departure = text;
+            activeRequests[chatId] = true;
             sendRequestToAdmin(chatId, msg.from);
             delete userData[chatId];
         }
     }
 });
 
-// Отправка заявки админам
+// Отправка админу
 function sendRequestToAdmin(userId, from) {
     const data = userData[userId];
     let messageText =
@@ -166,9 +169,9 @@ function sendRequestToAdmin(userId, from) {
     bot.sendMessage(userId, 'Заявка отправлена, ожидайте ответа.');
 }
 
-// Обработка нажатий админа
+// Обработка кнопок админа
 bot.on('callback_query', (query) => {
-    const data = query.data;
+    const [action, userId] = query.data.split('_');
     const fromId = query.from.id;
 
     if (!ADMINS.includes(fromId)) {
@@ -176,11 +179,10 @@ bot.on('callback_query', (query) => {
         return;
     }
 
-    const [action, userId] = data.split('_');
-
     if (action === 'approve') {
-        bot.sendMessage(userId, '✅ Заявка обработана. Ожидайте поступления.');
-        activeRequests.delete(Number(userId)); // Разблокируем пользователя
+        bot.sendMessage(userId, '✅ Заявка отработана. Ожидайте поступления.');
+        bot.sendMessage(fromId, 'Заявка обработана.');
+        delete activeRequests[userId];
         bot.answerCallbackQuery(query.id, { text: 'Заявка обработана.' });
     } else if (action === 'reject') {
         pendingRejections[fromId] = userId;
