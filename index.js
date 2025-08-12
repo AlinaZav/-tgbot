@@ -1,15 +1,23 @@
 const TelegramBot = require('node-telegram-bot-api');
 
+// Получаем токен из переменной окружения
 const token = process.env.TOKEN;
+
+if (!token) {
+    console.error("❌ Ошибка: токен не предоставлен! Установите переменную окружения TOKEN.");
+    process.exit(1); // Останавливаем выполнение
+}
+
 const bot = new TelegramBot(token, { polling: true });
 
+// ID админов
 const ADMINS = [5202993972];
 
 let acceptingRequests = true;
 const userData = {};
 const submittedChecks = new Set();
 const pendingRejections = {};
-const activeRequests = new Set(); // пользователи с активной отправленной заявкой
+const activeRequests = new Set(); // Храним пользователей с активной заявкой
 
 function sendMainMenu(chatId) {
     bot.sendMessage(chatId, 'Выберите тип заявки:', {
@@ -53,18 +61,18 @@ bot.on('message', (msg) => {
         const targetUser = pendingRejections[chatId];
         bot.sendMessage(targetUser, `❌ Отказано: ${text}`);
         bot.sendMessage(chatId, 'Причина отказа отправлена водителю.');
+        activeRequests.delete(targetUser); // Разблокируем пользователя
         delete pendingRejections[chatId];
-        activeRequests.delete(parseInt(targetUser)); // снимаем блокировку
         return;
     }
 
-    // Запрет на отправку новой заявки, если есть активная отправленная
-    if (activeRequests.has(chatId) && !ADMINS.includes(msg.from.id)) {
-        bot.sendMessage(chatId, '⛔ У вас уже есть заявка в обработке. Дождитесь ответа.');
+    // Блокируем создание новой заявки, если у пользователя уже есть активная
+    if (activeRequests.has(chatId) && !userData[chatId] && ['Простой', 'Перепробег', 'Отказ от доставки'].includes(text) === false) {
+        bot.sendMessage(chatId, '⛔ У вас уже есть активная заявка. Дождитесь обработки.');
         return;
     }
 
-    // Автоматически показываем меню
+    // Автоматически показываем меню, если бот не в режиме диалога
     if (!userData[chatId] && !['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
         sendMainMenu(chatId);
         return;
@@ -77,7 +85,12 @@ bot.on('message', (msg) => {
 
     // Если пользователь выбрал тип заявки
     if (['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
+        if (activeRequests.has(chatId)) {
+            bot.sendMessage(chatId, '⛔ У вас уже есть активная заявка.');
+            return;
+        }
         userData[chatId] = { type: text, step: 1 };
+        activeRequests.add(chatId); // Запоминаем, что у него активная заявка
         bot.sendMessage(chatId, 'Введите дату закрытия рейса (В формате ДД.ММ.ГГГГ):');
         return;
     }
@@ -95,6 +108,7 @@ bot.on('message', (msg) => {
             if (submittedChecks.has(text.toUpperCase())) {
                 bot.sendMessage(chatId, '⛔ Такая заявка уже существует!');
                 delete userData[chatId];
+                activeRequests.delete(chatId);
                 sendMainMenu(chatId);
                 return;
             }
@@ -123,9 +137,6 @@ bot.on('message', (msg) => {
 // Отправка заявки админам
 function sendRequestToAdmin(userId, from) {
     const data = userData[userId];
-
-    activeRequests.add(userId); // блокируем отправку новых заявок только теперь
-
     let messageText =
         `🚚 Новая заявка:\n` +
         `Тип: ${data.type}\n` +
@@ -168,10 +179,9 @@ bot.on('callback_query', (query) => {
     const [action, userId] = data.split('_');
 
     if (action === 'approve') {
-        bot.sendMessage(userId, '✅ Заявка отработана. Ожидайте поступления.');
-        bot.sendMessage(fromId, '✅ Заявка обработана');
+        bot.sendMessage(userId, '✅ Заявка обработана. Ожидайте поступления.');
+        activeRequests.delete(Number(userId)); // Разблокируем пользователя
         bot.answerCallbackQuery(query.id, { text: 'Заявка обработана.' });
-        activeRequests.delete(parseInt(userId)); // снимаем блокировку
     } else if (action === 'reject') {
         pendingRejections[fromId] = userId;
         bot.sendMessage(fromId, '✏ Введите причину отказа:');
