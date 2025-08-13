@@ -18,10 +18,8 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ====== Telegram bot через вебхук ======
-const bot = new TelegramBot(TOKEN, { webHook: true });
-const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN}`;
-bot.setWebHook(WEBHOOK_URL);
+// ====== Telegram bot ======
+const bot = new TelegramBot(TOKEN);
 
 // ====== State ======
 const ADMINS = [5234610042];
@@ -70,7 +68,6 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = (msg.text || '').trim();
 
-  // Админ вводит причину отказа
   if (pendingRejections[chatId]) {
     const targetUser = pendingRejections[chatId];
     bot.sendMessage(targetUser, `❌ Отказано: ${text}`);
@@ -80,26 +77,22 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // У пользователя уже есть необработанная заявка
   if (activeRequests[chatId]) {
     bot.sendMessage(chatId, '⛔ Вы уже отправили заявку.');
     return;
   }
 
-  // Приём заявок закрыт
   if (!acceptingRequests && !ADMINS.includes(msg.from.id)) {
     bot.sendMessage(chatId, '⛔ Приём заявок закрыт.');
     return;
   }
 
-  // Старт сценария
   if (['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
     userData[chatId] = { type: text, step: 1 };
     bot.sendMessage(chatId, 'Введите дату закрытия рейса (ДД.ММ.ГГГГ):');
     return;
   }
 
-  // Продолжение сценария
   if (userData[chatId]) {
     const step = userData[chatId].step;
     const type = userData[chatId].type;
@@ -215,11 +208,19 @@ bot.on('callback_query', (query) => {
 // ====== HTTP server endpoints ======
 app.get('/', (req, res) => res.send('Bot is running!'));
 app.post(`/bot${TOKEN}`, (req, res) => {
+  console.log('📩 Update:', req.body); // Логируем входящие апдейты
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-app.listen(PORT, () => {
-  console.log(`🌐 Server running on port ${PORT}`);
-  console.log(`🚀 Webhook set to: ${WEBHOOK_URL}`);
+// ====== Запуск сервера и установка вебхука ======
+app.listen(PORT, async () => {
+  const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN}`;
+  try {
+    await bot.setWebHook(WEBHOOK_URL);
+    console.log(`🌐 Server running on port ${PORT}`);
+    console.log(`🚀 Webhook set to: ${WEBHOOK_URL}`);
+  } catch (err) {
+    console.error('❌ Ошибка установки вебхука:', err);
+  }
 });
