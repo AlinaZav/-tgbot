@@ -206,6 +206,7 @@ bot.on('callback_query', (query) => {
 
   if (action === 'approve') {
     bot.sendMessage(userId, '✅ Заявка отработана.');
+     bot.sendMessage(fromId, '✅ Заявка отработана.');
     delete activeRequests[userId];
     bot.answerCallbackQuery(query.id, { text: 'Готово.' });
   } else if (action === 'reject') {
