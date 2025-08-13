@@ -109,7 +109,7 @@ bot.on('message', async (msg) => {
     if (step === 1) {
       userData[chatId].date = text;
       userData[chatId].step = 2;
-      bot.sendMessage(chatId, 'Введите номер товарного чека:');
+      bot.sendMessage(chatId, 'Введите номер товарного чека (Полностью):');
       return;
     }
 
