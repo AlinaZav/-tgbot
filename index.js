@@ -1,3 +1,4 @@
+// ====== Запуск мини-веб-сервера ======
 const express = require('express');
 const bodyParser = require('body-parser');
 const TelegramBot = require('node-telegram-bot-api');
@@ -7,39 +8,19 @@ app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 8000;
 const TOKEN = process.env.TOKEN;
-const HOST = `https://serious-leola-botpetr-c7d2426b.koyeb.app`; // твой домен на Koyeb
-const WEBHOOK_PATH = `/bot${TOKEN}`;
-const WEBHOOK_URL = HOST + WEBHOOK_PATH;
 
 if (!TOKEN) {
     console.error("❌ Переменная окружения TOKEN не задана!");
     process.exit(1);
 }
 
-// Создаём бота в режиме webhook
-const bot = new TelegramBot(TOKEN, { webHook: true });
+// ====== Создаём бота в режиме webhook ======
+const bot = new TelegramBot(TOKEN);
+const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN}`;
 
-// Регистрируем webhook только после старта сервера
-app.post(WEBHOOK_PATH, (req, res) => {
-    bot.processUpdate(req.body);
-    res.sendStatus(200);
-});
-
-app.get('/', (req, res) => {
-    res.send('Bot is running!');
-});
-
-app.listen(PORT, async () => {
-    console.log(`🌐 Web server running on port ${PORT}`);
-    try {
-        await bot.setWebHook(WEBHOOK_URL);
-        console.log(`✅ Webhook установлен: ${WEBHOOK_URL}`);
-    } catch (err) {
-        console.error("❌ Ошибка установки webhook:", err);
-    }
-});
-
-/* --- Твой код логики бота ниже без изменений --- */
+bot.setWebHook(WEBHOOK_URL)
+    .then(() => console.log(`✅ Webhook установлен: ${WEBHOOK_URL}`))
+    .catch(err => console.error("❌ Ошибка установки webhook:", err));
 
 // ====== Хранилища данных ======
 const ADMINS = [5202993972];
@@ -48,6 +29,12 @@ const userData = {};
 const submittedChecks = new Set();
 const pendingRejections = {};
 const activeRequests = {};
+
+// ====== Обработка входящих апдейтов ======
+app.post(`/bot${TOKEN}`, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+});
 
 // ====== Главное меню ======
 function sendMainMenu(chatId) {
@@ -85,30 +72,38 @@ bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
+    // Админ пишет причину отказа
     if (pendingRejections[chatId]) {
         const targetUser = pendingRejections[chatId];
         bot.sendMessage(targetUser, `❌ Отказано: ${text}`);
+        sendMainMenu(targetUser); // показываем меню после отказа
+
         bot.sendMessage(chatId, 'Причина отказа отправлена.');
         delete pendingRejections[chatId];
+        delete activeRequests[targetUser];
         return;
     }
 
+    // Уже есть активная заявка
     if (activeRequests[chatId]) {
         bot.sendMessage(chatId, '⛔ Вы уже отправили заявку. Дождитесь её обработки.');
         return;
     }
 
+    // Приём заявок закрыт
     if (!acceptingRequests && !ADMINS.includes(msg.from.id)) {
         bot.sendMessage(chatId, '⛔ Приём заявок сейчас закрыт.');
         return;
     }
 
+    // Выбор типа
     if (['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
         userData[chatId] = { type: text, step: 1 };
         bot.sendMessage(chatId, 'Введите дату закрытия рейса (ДД.ММ.ГГГГ):');
         return;
     }
 
+    // Заполнение заявки
     if (userData[chatId]) {
         const step = userData[chatId].step;
         const type = userData[chatId].type;
@@ -148,6 +143,7 @@ bot.on('message', (msg) => {
     }
 });
 
+// ====== Отправка заявки админу ======
 function sendRequestToAdmin(userId, from) {
     const data = userData[userId];
     let messageText =
@@ -179,6 +175,7 @@ function sendRequestToAdmin(userId, from) {
     bot.sendMessage(userId, 'Заявка отправлена, ожидайте ответа.');
 }
 
+// ====== Обработка кнопок ======
 bot.on('callback_query', (query) => {
     const [action, userId] = query.data.split('_');
     const fromId = query.from.id;
@@ -190,6 +187,7 @@ bot.on('callback_query', (query) => {
 
     if (action === 'approve') {
         bot.sendMessage(userId, '✅ Заявка отработана. Ожидайте поступления.');
+        sendMainMenu(userId); // после одобрения сразу меню
         bot.sendMessage(fromId, 'Заявка обработана.');
         delete activeRequests[userId];
         bot.answerCallbackQuery(query.id, { text: 'Заявка обработана.' });
@@ -198,4 +196,13 @@ bot.on('callback_query', (query) => {
         bot.sendMessage(fromId, '✏ Введите причину отказа:');
         bot.answerCallbackQuery(query.id, { text: 'Напишите причину отказа.' });
     }
+});
+
+// ====== Запуск сервера ======
+app.get('/', (req, res) => {
+    res.send('Bot is running!');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 Web server running on port ${PORT}`);
 });
