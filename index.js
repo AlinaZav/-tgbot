@@ -19,7 +19,8 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ====== Telegram bot ======
-const bot = new TelegramBot(TOKEN);
+// ОБЯЗАТЕЛЬНО включаем webHook: true
+const bot = new TelegramBot(TOKEN, { webHook: true });
 
 // ====== State ======
 const ADMINS = [5234610042];
@@ -64,6 +65,11 @@ async function saveCheck(checkNumber) {
 }
 
 // ====== Handlers ======
+// Для теста — простой ответ на /start
+bot.onText(/\/start/, (msg) => {
+  bot.sendMessage(msg.chat.id, '✅ Бот запущен! Сообщение пришло через вебхук.');
+});
+
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = (msg.text || '').trim();
@@ -208,7 +214,7 @@ bot.on('callback_query', (query) => {
 // ====== HTTP server endpoints ======
 app.get('/', (req, res) => res.send('Bot is running!'));
 app.post(`/bot${TOKEN}`, (req, res) => {
-  console.log('📩 Update:', req.body); // Логируем входящие апдейты
+  console.log('📩 Update:', req.body);
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
