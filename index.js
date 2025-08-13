@@ -24,7 +24,7 @@ const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN
 bot.setWebHook(WEBHOOK_URL);
 
 // ====== State ======
-const ADMINS = [5202993972];
+const ADMINS = [5234610042];
 let acceptingRequests = true;
 const userData = {};
 const pendingRejections = {};
