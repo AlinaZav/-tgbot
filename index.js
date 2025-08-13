@@ -16,19 +16,22 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
     process.exit(1);
 }
 
+// Подключаемся к Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ====== Создаём бота ======
 const bot = new TelegramBot(TOKEN);
 const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN}`;
 bot.setWebHook(WEBHOOK_URL);
 
+// ====== Хранилища ======
 const ADMINS = [5202993972];
 let acceptingRequests = true;
 const userData = {};
 const pendingRejections = {};
 const activeRequests = {};
 
-// === Функции для чека ===
+// ====== Запросы к Supabase ======
 async function checkExists(checkNumber) {
     const { data, error } = await supabase
         .from('checks')
@@ -44,31 +47,24 @@ async function checkExists(checkNumber) {
 }
 
 async function saveCheck(checkNumber) {
+    // проверяем заранее
+    const exists = await checkExists(checkNumber);
+    if (exists) {
+        return "exists";
+    }
+
     const { error } = await supabase
         .from('checks')
         .insert([{ check_number: checkNumber }]);
 
     if (error) {
         console.error("Ошибка сохранения чека:", error);
-        return false;
+        return "error";
     }
-    return true;
+    return "ok";
 }
 
-// === Блокировка заявки пользователя ===
-function lockUserRequest(userId) {
-    activeRequests[userId] = true;
-
-    // Авторазблокировка через 10 минут
-    setTimeout(() => {
-        if (activeRequests[userId]) {
-            delete activeRequests[userId];
-            bot.sendMessage(userId, '⏳ Ваша заявка снята с ожидания из-за отсутствия ответа.');
-        }
-    }, 10 * 60 * 1000);
-}
-
-// === Обработка сообщений ===
+// ====== Основная логика ======
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
@@ -82,7 +78,7 @@ bot.on('message', async (msg) => {
     }
 
     if (activeRequests[chatId]) {
-        bot.sendMessage(chatId, '⛔ Вы уже отправили заявку. Дождитесь ответа.');
+        bot.sendMessage(chatId, '⛔ Вы уже отправили заявку.');
         return;
     }
 
@@ -107,16 +103,15 @@ bot.on('message', async (msg) => {
             bot.sendMessage(chatId, 'Введите номер товарного чека:');
         } else if (step === 2) {
             const checkNumber = text.toUpperCase();
-            const exists = await checkExists(checkNumber);
 
-            if (exists) {
+            const saved = await saveCheck(checkNumber);
+
+            if (saved === "exists") {
                 bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе!');
                 delete userData[chatId];
                 return;
             }
-
-            const saved = await saveCheck(checkNumber);
-            if (!saved) {
+            if (saved === "error") {
                 bot.sendMessage(chatId, '❌ Ошибка сохранения чека.');
                 delete userData[chatId];
                 return;
@@ -128,6 +123,7 @@ bot.on('message', async (msg) => {
                 userData[chatId].step++;
                 bot.sendMessage(chatId, 'Введите время прибытия (ЧЧ:ММ):');
             } else {
+                activeRequests[chatId] = true;
                 sendRequestToAdmin(chatId, msg.from);
                 delete userData[chatId];
             }
@@ -137,13 +133,13 @@ bot.on('message', async (msg) => {
             bot.sendMessage(chatId, 'Введите время убытия (ЧЧ:ММ):');
         } else if (step === 4 && type === 'Простой') {
             userData[chatId].departure = text;
+            activeRequests[chatId] = true;
             sendRequestToAdmin(chatId, msg.from);
             delete userData[chatId];
         }
     }
 });
 
-// === Отправка админам ===
 function sendRequestToAdmin(userId, from) {
     const data = userData[userId];
     let messageText =
@@ -171,11 +167,9 @@ function sendRequestToAdmin(userId, from) {
         });
     });
 
-    lockUserRequest(userId); // блокируем + таймер
     bot.sendMessage(userId, 'Заявка отправлена, ожидайте ответа.');
 }
 
-// === Обработка кнопок админа ===
 bot.on('callback_query', (query) => {
     const [action, userId] = query.data.split('_');
     const fromId = query.from.id;
@@ -192,7 +186,6 @@ bot.on('callback_query', (query) => {
     } else if (action === 'reject') {
         pendingRejections[fromId] = userId;
         bot.sendMessage(fromId, '✏ Введите причину отказа:');
-        delete activeRequests[userId];
         bot.answerCallbackQuery(query.id, { text: 'Введите причину.' });
     }
 });
