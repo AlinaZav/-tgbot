@@ -56,13 +56,10 @@ async function saveCheck(checkNumber) {
         .insert([{ check_number: checkNumber, created_at: new Date().toISOString() }]);
 
     if (error) {
-        if (error.code === '23505') {
-            return { success: false, duplicate: true };
-        }
         console.error("Ошибка сохранения чека:", error);
-        return { success: false, duplicate: false };
+        return false;
     }
-    return { success: true };
+    return true;
 }
 
 // ====== Основная логика ======
@@ -102,23 +99,20 @@ bot.on('message', async (msg) => {
             userData[chatId].date = text;
             userData[chatId].step++;
             bot.sendMessage(chatId, 'Введите номер товарного чека:');
+
         } else if (step === 2) {
             const checkNumber = text.toUpperCase();
-            const exists = await checkExists(checkNumber);
 
+            // Проверка на дубликат
+            const exists = await checkExists(checkNumber);
             if (exists) {
-                bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе за последние 3 месяца!');
-                delete userData[chatId];
-                return;
+                bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе! Введите другой номер:');
+                return; // остаёмся на step=2
             }
 
-            const result = await saveCheck(checkNumber);
-            if (!result.success) {
-                if (result.duplicate) {
-                    bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе!');
-                } else {
-                    bot.sendMessage(chatId, '❌ Ошибка сохранения чека.');
-                }
+            const saved = await saveCheck(checkNumber);
+            if (!saved) {
+                bot.sendMessage(chatId, '❌ Ошибка сохранения чека.');
                 delete userData[chatId];
                 return;
             }
@@ -133,10 +127,12 @@ bot.on('message', async (msg) => {
                 sendRequestToAdmin(chatId, msg.from);
                 delete userData[chatId];
             }
+
         } else if (step === 3 && type === 'Простой') {
             userData[chatId].arrival = text;
             userData[chatId].step++;
             bot.sendMessage(chatId, 'Введите время убытия (ЧЧ:ММ):');
+
         } else if (step === 4 && type === 'Простой') {
             userData[chatId].departure = text;
             activeRequests[chatId] = true;
