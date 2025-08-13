@@ -33,7 +33,7 @@ const activeRequests = {};
 // Нормализация чека
 const normalizeCheck = (s = '') => s.toString().trim().toUpperCase();
 
-// --- Проверка в БД за 3 месяца (быстрая)
+// --- Проверка в БД за 3 месяца
 async function checkExists(checkNumber) {
   const threeMonthsAgo = new Date();
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
@@ -51,14 +51,13 @@ async function checkExists(checkNumber) {
   return data && data.length > 0;
 }
 
-// --- Сохранение, с ловлей уникального ограничения
+// --- Сохранение
 async function saveCheck(checkNumber) {
   const { error } = await supabase
     .from('checks')
     .insert([{ check_number: checkNumber, created_at: new Date().toISOString() }]);
 
   if (error) {
-    // 23505 — unique_violation в Postgres
     if (error.code === '23505') {
       return { ok: false, duplicate: true };
     }
@@ -79,6 +78,7 @@ bot.on('message', async (msg) => {
     bot.sendMessage(targetUser, `❌ Отказано: ${text}`);
     bot.sendMessage(chatId, 'Причина отказа отправлена.');
     delete pendingRejections[chatId];
+    delete activeRequests[targetUser]; // Разблокируем пользователя
     return;
   }
 
@@ -116,19 +116,17 @@ bot.on('message', async (msg) => {
     if (step === 2) {
       const checkNumber = normalizeCheck(text);
 
-      // 1) Быстрая проверка (за 3 мес.)
       const exists = await checkExists(checkNumber);
       if (exists) {
         bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе! Введите другой номер:');
-        return; // остаёмся на шаге 2
+        return;
       }
 
-      // 2) Сохранение с ловлей "unique_violation" (страховка от гонок/старых записей)
       const saved = await saveCheck(checkNumber);
       if (!saved.ok) {
         if (saved.duplicate) {
           bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе! Введите другой номер:');
-          return; // остаёмся на шаге 2
+          return;
         }
         bot.sendMessage(chatId, '❌ Ошибка сохранения чека. Попробуйте позже.');
         delete userData[chatId];
@@ -139,11 +137,10 @@ bot.on('message', async (msg) => {
 
       if (type === 'Простой') {
         userData[chatId].step = 3;
-        bot.sendMessage(chatId, 'Введите время прибытия (ЧЧ:ММ):');
+        bot.sendMessage(chatId, 'Введите время прибытия на адрес (ЧЧ:ММ):');
         return;
       }
 
-      // Для остальных типов сразу отправляем админу
       activeRequests[chatId] = true;
       sendRequestToAdmin(chatId, msg.from);
       delete userData[chatId];
@@ -153,7 +150,7 @@ bot.on('message', async (msg) => {
     if (step === 3 && type === 'Простой') {
       userData[chatId].arrival = text;
       userData[chatId].step = 4;
-      bot.sendMessage(chatId, 'Введите время убытия (ЧЧ:ММ):');
+      bot.sendMessage(chatId, 'Введите время убытия с адреса (ЧЧ:ММ):');
       return;
     }
 
@@ -205,12 +202,13 @@ bot.on('callback_query', (query) => {
   }
 
   if (action === 'approve') {
-    bot.sendMessage(userId, '✅ Заявка отработана.');
-     bot.sendMessage(fromId, '✅ Заявка отработана.');
-    delete activeRequests[userId];
+    bot.sendMessage(userId, '✅ Заявка отработана. Ожидайте поступления');
+    bot.sendMessage(fromId, '✅ Заявка отработана.');
+    delete activeRequests[userId]; // Разрешаем новые заявки
     bot.answerCallbackQuery(query.id, { text: 'Готово.' });
   } else if (action === 'reject') {
     pendingRejections[fromId] = userId;
+    delete activeRequests[userId]; // Разрешаем новые заявки
     bot.sendMessage(fromId, '✏ Введите причину отказа:');
     bot.answerCallbackQuery(query.id, { text: 'Введите причину.' });
   }
