@@ -68,7 +68,7 @@ async function saveCheck(checkNumber) {
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    '✅ Бот запущен! Сообщение пришло через вебхук.\n\nВыберите тип заявки:',
+    'Выберите тип заявки:',
     {
       reply_markup: {
         keyboard: [
