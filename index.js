@@ -18,8 +18,8 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ====== Telegram bot (webhook) ======
-const bot = new TelegramBot(TOKEN);
+// ====== Telegram bot через вебхук ======
+const bot = new TelegramBot(TOKEN, { webHook: true });
 const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN}`;
 bot.setWebHook(WEBHOOK_URL);
 
@@ -30,10 +30,9 @@ const userData = {};
 const pendingRejections = {};
 const activeRequests = {};
 
-// Нормализация чека
+// ====== Utils ======
 const normalizeCheck = (s = '') => s.toString().trim().toUpperCase();
 
-// --- Проверка в БД за 3 месяца
 async function checkExists(checkNumber) {
   const threeMonthsAgo = new Date();
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
@@ -51,7 +50,6 @@ async function checkExists(checkNumber) {
   return data && data.length > 0;
 }
 
-// --- Сохранение
 async function saveCheck(checkNumber) {
   const { error } = await supabase
     .from('checks')
@@ -78,7 +76,7 @@ bot.on('message', async (msg) => {
     bot.sendMessage(targetUser, `❌ Отказано: ${text}`);
     bot.sendMessage(chatId, 'Причина отказа отправлена.');
     delete pendingRejections[chatId];
-    delete activeRequests[targetUser]; // Разблокируем пользователя
+    delete activeRequests[targetUser];
     return;
   }
 
@@ -204,21 +202,24 @@ bot.on('callback_query', (query) => {
   if (action === 'approve') {
     bot.sendMessage(userId, '✅ Заявка отработана. Ожидайте поступления');
     bot.sendMessage(fromId, '✅ Заявка отработана.');
-    delete activeRequests[userId]; // Разрешаем новые заявки
+    delete activeRequests[userId];
     bot.answerCallbackQuery(query.id, { text: 'Готово.' });
   } else if (action === 'reject') {
     pendingRejections[fromId] = userId;
-    delete activeRequests[userId]; // Разрешаем новые заявки
+    delete activeRequests[userId];
     bot.sendMessage(fromId, '✏ Введите причину отказа:');
     bot.answerCallbackQuery(query.id, { text: 'Введите причину.' });
   }
 });
 
-// ====== Web server ======
+// ====== HTTP server endpoints ======
 app.get('/', (req, res) => res.send('Bot is running!'));
 app.post(`/bot${TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-app.listen(PORT, () => console.log(`🌐 Server on ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🌐 Server running on port ${PORT}`);
+  console.log(`🚀 Webhook set to: ${WEBHOOK_URL}`);
+});
