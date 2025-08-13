@@ -33,35 +33,33 @@ const activeRequests = {};
 
 // ====== Запросы к Supabase ======
 async function checkExists(checkNumber) {
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
     const { data, error } = await supabase
         .from('checks')
-        .select('id')
+        .select('id, created_at')
         .eq('check_number', checkNumber)
-        .maybeSingle();
+        .gte('created_at', threeMonthsAgo.toISOString());
 
     if (error) {
         console.error("Ошибка проверки чека:", error);
         return false;
     }
-    return !!data;
+
+    return data && data.length > 0;
 }
 
 async function saveCheck(checkNumber) {
-    // проверяем заранее
-    const exists = await checkExists(checkNumber);
-    if (exists) {
-        return "exists";
-    }
-
     const { error } = await supabase
         .from('checks')
-        .insert([{ check_number: checkNumber }]);
+        .insert([{ check_number: checkNumber, created_at: new Date().toISOString() }]);
 
     if (error) {
         console.error("Ошибка сохранения чека:", error);
-        return "error";
+        return false;
     }
-    return "ok";
+    return true;
 }
 
 // ====== Основная логика ======
@@ -103,15 +101,16 @@ bot.on('message', async (msg) => {
             bot.sendMessage(chatId, 'Введите номер товарного чека:');
         } else if (step === 2) {
             const checkNumber = text.toUpperCase();
+            const exists = await checkExists(checkNumber);
 
-            const saved = await saveCheck(checkNumber);
-
-            if (saved === "exists") {
-                bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе!');
+            if (exists) {
+                bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе за последние 3 месяца!');
                 delete userData[chatId];
                 return;
             }
-            if (saved === "error") {
+
+            const saved = await saveCheck(checkNumber);
+            if (!saved) {
                 bot.sendMessage(chatId, '❌ Ошибка сохранения чека.');
                 delete userData[chatId];
                 return;
