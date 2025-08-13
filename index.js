@@ -19,7 +19,6 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ====== Telegram bot ======
-// ОБЯЗАТЕЛЬНО включаем webHook: true
 const bot = new TelegramBot(TOKEN, { webHook: true });
 
 // ====== State ======
@@ -65,9 +64,21 @@ async function saveCheck(checkNumber) {
 }
 
 // ====== Handlers ======
-// Для теста — простой ответ на /start
+// При /start выводим кнопки
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, '✅ Бот запущен! Сообщение пришло через вебхук.');
+  bot.sendMessage(
+    msg.chat.id,
+    '✅ Бот запущен! Сообщение пришло через вебхук.\n\nВыберите тип заявки:',
+    {
+      reply_markup: {
+        keyboard: [
+          ['Простой', 'Перепробег', 'Отказ от доставки']
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true
+      }
+    }
+  );
 });
 
 bot.on('message', async (msg) => {
