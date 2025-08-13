@@ -56,10 +56,13 @@ async function saveCheck(checkNumber) {
         .insert([{ check_number: checkNumber, created_at: new Date().toISOString() }]);
 
     if (error) {
+        if (error.code === '23505') {
+            return { success: false, duplicate: true };
+        }
         console.error("Ошибка сохранения чека:", error);
-        return false;
+        return { success: false, duplicate: false };
     }
-    return true;
+    return { success: true };
 }
 
 // ====== Основная логика ======
@@ -109,9 +112,13 @@ bot.on('message', async (msg) => {
                 return;
             }
 
-            const saved = await saveCheck(checkNumber);
-            if (!saved) {
-                bot.sendMessage(chatId, '❌ Ошибка сохранения чека.');
+            const result = await saveCheck(checkNumber);
+            if (!result.success) {
+                if (result.duplicate) {
+                    bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе!');
+                } else {
+                    bot.sendMessage(chatId, '❌ Ошибка сохранения чека.');
+                }
                 delete userData[chatId];
                 return;
             }
