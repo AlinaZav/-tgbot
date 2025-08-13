@@ -1,29 +1,28 @@
-// Запускаем мини-веб-сервер, чтобы Koyeb видел, что бот жив
+// ====== Запуск мини-веб-сервера ======
 const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 8000;
-
-app.get('/', (req, res) => {
-  res.send('Bot is running!');
-});
-
-app.listen(PORT, () => {
-  console.log(`Web server running on port ${PORT}`);
-});
-
-// Telegram bot
+const bodyParser = require('body-parser');
 const TelegramBot = require('node-telegram-bot-api');
 
-// Получаем токен из переменной окружения (НЕ храним в коде!)
-const token = process.env.TOKEN;
+const app = express();
+app.use(bodyParser.json());
 
-if (!token) {
-  console.error("❌ BOT_TOKEN не задан. Добавьте переменную окружения в Koyeb.");
-  process.exit(1);
+const PORT = process.env.PORT || 8000;
+const TOKEN = process.env.TOKEN;
+
+if (!TOKEN) {
+    console.error("❌ Переменная окружения TOKEN не задана!");
+    process.exit(1);
 }
 
-const bot = new TelegramBot(token, { polling: true });
+// ====== Создаём бота в режиме webhook ======
+const bot = new TelegramBot(TOKEN);
+const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN}`;
 
+bot.setWebHook(WEBHOOK_URL)
+    .then(() => console.log(`✅ Webhook установлен: ${WEBHOOK_URL}`))
+    .catch(err => console.error("❌ Ошибка установки webhook:", err));
+
+// ====== Хранилища данных ======
 const ADMINS = [5202993972];
 let acceptingRequests = true;
 const userData = {};
@@ -31,7 +30,13 @@ const submittedChecks = new Set();
 const pendingRejections = {};
 const activeRequests = {};
 
-// Главное меню
+// ====== Обработка входящих апдейтов ======
+app.post(`/bot${TOKEN}`, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+});
+
+// ====== Главное меню ======
 function sendMainMenu(chatId) {
     bot.sendMessage(chatId, 'Выберите тип заявки:', {
         reply_markup: {
@@ -45,31 +50,29 @@ function sendMainMenu(chatId) {
     });
 }
 
-// Открыть заявки
+// ====== Команды ======
 bot.onText(/\/open/, (msg) => {
     if (!ADMINS.includes(msg.from.id)) return;
     acceptingRequests = true;
     bot.sendMessage(msg.chat.id, '✅ Бот снова доступен!');
 });
 
-// Закрыть заявки
 bot.onText(/\/close/, (msg) => {
     if (!ADMINS.includes(msg.from.id)) return;
     acceptingRequests = false;
     bot.sendMessage(msg.chat.id, '⛔ Приём заявок закрыт.');
 });
 
-// Старт
 bot.onText(/\/start/, (msg) => {
     sendMainMenu(msg.chat.id);
 });
 
-// Логика бота
+// ====== Логика обработки сообщений ======
 bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
-    // Если админ пишет причину отказа
+    // Админ пишет причину отказа
     if (pendingRejections[chatId]) {
         const targetUser = pendingRejections[chatId];
         bot.sendMessage(targetUser, `❌ Отказано: ${text}`);
@@ -78,19 +81,19 @@ bot.on('message', (msg) => {
         return;
     }
 
-    // Если пользователь уже имеет активную заявку
+    // Уже есть активная заявка
     if (activeRequests[chatId]) {
         bot.sendMessage(chatId, '⛔ Вы уже отправили заявку. Дождитесь её обработки.');
         return;
     }
 
-    // Если бот закрыт
+    // Приём заявок закрыт
     if (!acceptingRequests && !ADMINS.includes(msg.from.id)) {
         bot.sendMessage(chatId, '⛔ Приём заявок сейчас закрыт.');
         return;
     }
 
-    // Если пользователь выбирает тип
+    // Выбор типа
     if (['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
         userData[chatId] = { type: text, step: 1 };
         bot.sendMessage(chatId, 'Введите дату закрытия рейса (ДД.ММ.ГГГГ):');
@@ -137,7 +140,7 @@ bot.on('message', (msg) => {
     }
 });
 
-// Отправка админу
+// ====== Отправка заявки админу ======
 function sendRequestToAdmin(userId, from) {
     const data = userData[userId];
     let messageText =
@@ -169,7 +172,7 @@ function sendRequestToAdmin(userId, from) {
     bot.sendMessage(userId, 'Заявка отправлена, ожидайте ответа.');
 }
 
-// Обработка кнопок админа
+// ====== Обработка кнопок ======
 bot.on('callback_query', (query) => {
     const [action, userId] = query.data.split('_');
     const fromId = query.from.id;
@@ -189,4 +192,13 @@ bot.on('callback_query', (query) => {
         bot.sendMessage(fromId, '✏ Введите причину отказа:');
         bot.answerCallbackQuery(query.id, { text: 'Напишите причину отказа.' });
     }
+});
+
+// ====== Запуск сервера ======
+app.get('/', (req, res) => {
+    res.send('Bot is running!');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 Web server running on port ${PORT}`);
 });
