@@ -19,7 +19,7 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const bot = new TelegramBot(TOKEN, { webHook: true });
 
-const ADMINS = [5234610042, 5202993972];
+const ADMINS = [5234610042];
 let acceptingRequests = true;
 const userData = {};
 const pendingRejections = {}; // { adminId: { userId, checkNumber } }
