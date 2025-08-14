@@ -17,16 +17,12 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-// ====== Telegram bot ======
 const bot = new TelegramBot(TOKEN, { webHook: true });
 
-// ====== State ======
-const ADMINS = [5234610042];
+const ADMINS = [5234610042, 5202993972];
 let acceptingRequests = true;
 const userData = {};
-const pendingRejections = {};
-const activeRequests = {};
+const pendingRejections = {}; // { adminId: { userId, checkNumber } }
 
 // ====== Utils ======
 const normalizeCheck = (s = '') => s.toString().trim().toUpperCase();
@@ -63,53 +59,60 @@ async function saveCheck(checkNumber) {
   return { ok: true };
 }
 
-// ====== Handlers ======
-// При /start выводим кнопки
-bot.onText(/\/start/, (msg) => {
+// ====== Show menu ======
+function showMenu(chatId) {
   bot.sendMessage(
-    msg.chat.id,
+    chatId,
     'Выберите тип заявки:',
     {
       reply_markup: {
-        keyboard: [
-          ['Простой', 'Перепробег', 'Отказ от доставки']
-        ],
+        keyboard: [['Простой', 'Перепробег', 'Отказ от доставки']],
         resize_keyboard: true,
-        one_time_keyboard: true
+        one_time_keyboard: false
       }
     }
   );
+}
+
+// ====== Handlers ======
+bot.onText(/\/start/, (msg) => {
+  delete userData[msg.chat.id]; // Сброс состояния
+  showMenu(msg.chat.id);
 });
 
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = (msg.text || '').trim();
 
+  // Если админ вводит причину отказа
   if (pendingRejections[chatId]) {
-    const targetUser = pendingRejections[chatId];
-    bot.sendMessage(targetUser, `❌ Отказано: ${text}`);
+    const { userId, checkNumber } = pendingRejections[chatId];
+    bot.sendMessage(userId, `❌ Отказ по чеку №${checkNumber}. Причина: ${text}`);
     bot.sendMessage(chatId, 'Причина отказа отправлена.');
     delete pendingRejections[chatId];
-    delete activeRequests[targetUser];
+    showMenu(userId);
     return;
   }
 
-  if (activeRequests[chatId]) {
-    bot.sendMessage(chatId, '⛔ Вы уже отправили заявку.');
+  // Запрет писать до выбора типа заявки
+  if (!userData[chatId] && !['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
+    bot.sendMessage(chatId, '⛔ Сначала выберите тип заявки.', {
+      reply_markup: {
+        keyboard: [['Простой', 'Перепробег', 'Отказ от доставки']],
+        resize_keyboard: true
+      }
+    });
     return;
   }
 
-  if (!acceptingRequests && !ADMINS.includes(msg.from.id)) {
-    bot.sendMessage(chatId, '⛔ Приём заявок закрыт.');
-    return;
-  }
-
+  // Если выбрал тип заявки
   if (['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
     userData[chatId] = { type: text, step: 1 };
     bot.sendMessage(chatId, 'Введите дату закрытия рейса (ДД.ММ.ГГГГ):');
     return;
   }
 
+  // Обработка шагов
   if (userData[chatId]) {
     const step = userData[chatId].step;
     const type = userData[chatId].type;
@@ -123,7 +126,6 @@ bot.on('message', async (msg) => {
 
     if (step === 2) {
       const checkNumber = normalizeCheck(text);
-
       const exists = await checkExists(checkNumber);
       if (exists) {
         bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе! Введите другой номер:');
@@ -149,7 +151,6 @@ bot.on('message', async (msg) => {
         return;
       }
 
-      activeRequests[chatId] = true;
       sendRequestToAdmin(chatId, msg.from);
       delete userData[chatId];
       return;
@@ -164,7 +165,6 @@ bot.on('message', async (msg) => {
 
     if (step === 4 && type === 'Простой') {
       userData[chatId].departure = text;
-      activeRequests[chatId] = true;
       sendRequestToAdmin(chatId, msg.from);
       delete userData[chatId];
       return;
@@ -190,18 +190,18 @@ function sendRequestToAdmin(userId, from) {
     bot.sendMessage(adminId, messageText, {
       reply_markup: {
         inline_keyboard: [[
-          { text: '✅ Закрыто', callback_data: `approve_${userId}` },
-          { text: '❌ Отказано', callback_data: `reject_${userId}` },
+          { text: '✅ Закрыто', callback_data: `approve_${userId}_${data.checkNumber}` },
+          { text: '❌ Отказано', callback_data: `reject_${userId}_${data.checkNumber}` },
         ]],
       },
     });
   });
 
-  bot.sendMessage(userId, 'Заявка отправлена, ожидайте ответа.');
+  bot.sendMessage(userId, `Заявка по чеку №${data.checkNumber} отправлена, ожидайте ответа.`);
 }
 
 bot.on('callback_query', (query) => {
-  const [action, userId] = query.data.split('_');
+  const [action, userId, checkNumber] = query.data.split('_');
   const fromId = query.from.id;
 
   if (!ADMINS.includes(fromId)) {
@@ -210,19 +210,18 @@ bot.on('callback_query', (query) => {
   }
 
   if (action === 'approve') {
-    bot.sendMessage(userId, '✅ Заявка отработана. Ожидайте поступления');
+    bot.sendMessage(userId, `✅ Чек №${checkNumber} обработан. Ожидайте поступления.`);
     bot.sendMessage(fromId, '✅ Заявка отработана.');
-    delete activeRequests[userId];
     bot.answerCallbackQuery(query.id, { text: 'Готово.' });
+    showMenu(userId);
   } else if (action === 'reject') {
-    pendingRejections[fromId] = userId;
-    delete activeRequests[userId];
+    pendingRejections[fromId] = { userId, checkNumber };
     bot.sendMessage(fromId, '✏ Введите причину отказа:');
     bot.answerCallbackQuery(query.id, { text: 'Введите причину.' });
   }
 });
 
-// ====== HTTP server endpoints ======
+// ====== HTTP server ======
 app.get('/', (req, res) => res.send('Bot is running!'));
 app.post(`/bot${TOKEN}`, (req, res) => {
   console.log('📩 Update:', req.body);
@@ -230,7 +229,6 @@ app.post(`/bot${TOKEN}`, (req, res) => {
   res.sendStatus(200);
 });
 
-// ====== Запуск сервера и установка вебхука ======
 app.listen(PORT, async () => {
   const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN}`;
   try {
