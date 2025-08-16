@@ -108,7 +108,7 @@ bot.on('message', async (msg) => {
   // Если выбрал тип заявки
   if (['Простой', 'Перепробег', 'Отказ от доставки'].includes(text)) {
     userData[chatId] = { type: text, step: 1 };
-    bot.sendMessage(chatId, 'Введите дату закрытия рейса (ДД.ММ.ГГГГ):');
+    bot.sendMessage(chatId, 'Введите дату рейса (ДД.ММ.ГГГГ):');
     return;
   }
 
