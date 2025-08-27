@@ -1,12 +1,6 @@
-const express = require('express');
-const bodyParser = require('body-parser');
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
 
-const app = express();
-app.use(bodyParser.json());
-
-const PORT = process.env.PORT || 8000;
 const TOKEN = process.env.TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -17,7 +11,9 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const bot = new TelegramBot(TOKEN, { webHook: true });
+
+// 🚨 long polling вместо webHook
+const bot = new TelegramBot(TOKEN, { polling: true });
 
 const ADMINS = [5234610042];
 let acceptingRequests = true;
@@ -221,21 +217,4 @@ bot.on('callback_query', (query) => {
   }
 });
 
-// ====== HTTP server ======
-app.get('/', (req, res) => res.send('Bot is running!'));
-app.post(`/bot${TOKEN}`, (req, res) => {
-  console.log('📩 Update:', req.body);
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
-
-app.listen(PORT, async () => {
-  const WEBHOOK_URL = `https://serious-leola-botpetr-c7d2426b.koyeb.app/bot${TOKEN}`;
-  try {
-    await bot.setWebHook(WEBHOOK_URL);
-    console.log(`🌐 Server running on port ${PORT}`);
-    console.log(`🚀 Webhook set to: ${WEBHOOK_URL}`);
-  } catch (err) {
-    console.error('❌ Ошибка установки вебхука:', err);
-  }
-});
+console.log('🤖 Бот запущен (long polling)...');
