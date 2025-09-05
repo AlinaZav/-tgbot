@@ -46,7 +46,7 @@ async function saveCheck(checkNumber) {
     .from('checks')
     .insert([{ check_number: checkNumber }]) // created_at можно не указывать
     .select();
-
+}
   if (error) {
     console.error('❌ Ошибка сохранения чека:', JSON.stringify(error, null, 2));
     return { ok: false, duplicate: error.code === '23505' };
