@@ -44,7 +44,7 @@ async function checkExists(checkNumber) {
 async function saveCheck(checkNumber) {
   const { data, error } = await supabase
     .from('checks')
-    .insert([{ check_number: checkNumber }]) // created_at можно не указывать
+    .insert([{ check_number: checkNumber }])
     .select();
 
   if (error) {
@@ -55,6 +55,7 @@ async function saveCheck(checkNumber) {
   console.log('✅ Чек сохранён:', data);
   return { ok: true };
 }
+
 
 
 // ====== Show menu ======
