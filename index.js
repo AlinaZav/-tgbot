@@ -180,7 +180,7 @@ function sendRequestToAdmin(userId, from) {
     `🚚 Новая заявка:\n` +
     `Тип: ${data.type}\n` +
     `Дата: ${data.date}\n` +
-    `Чек: ${data.checkNumber}\n`;
+    `Товарный чек: ${data.checkNumber}\n`;
 
   if (data.type === 'Простой') {
     messageText += `Прибытие: ${data.arrival}\nУбытие: ${data.departure}\n`;
