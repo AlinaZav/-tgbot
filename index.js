@@ -45,18 +45,20 @@ async function saveCheck(checkNumber) {
   const { data, error } = await supabase
     .from('checks')
     .insert([{ check_number: checkNumber }])
-.select('id, check_number, created_at');
-
+    .select('id, check_number, created_at');
 
   if (error) {
-   console.error('❌ Ошибка сохранения чека:', error);
+    console.error('❌ Ошибка сохранения чека:');
+    console.error('message:', error.message);
+    console.error('details:', error.details);
+    console.error('hint:', error.hint);
+    console.error('code:', error.code);
     return { ok: false, duplicate: error.code === '23505' };
   }
 
   console.log('✅ Чек сохранён:', data);
   return { ok: true };
 }
-
 
 
 // ====== Show menu ======
