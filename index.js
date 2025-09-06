@@ -45,10 +45,11 @@ async function saveCheck(checkNumber) {
   const { data, error } = await supabase
     .from('checks')
     .insert([{ check_number: checkNumber }])
-    .select();
+.select('id, check_number, created_at');
+
 
   if (error) {
-    console.error('❌ Ошибка сохранения чека:', JSON.stringify(error, null, 2));
+   console.error('❌ Ошибка сохранения чека:', error);
     return { ok: false, duplicate: error.code === '23505' };
   }
 
