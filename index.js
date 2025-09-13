@@ -1,7 +1,10 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
 
+// Проверка переменных окружения
 const TOKEN = process.env.TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -11,55 +14,134 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
   process.exit(1);
 }
 
+// Проверка на уже запущенный процесс
+const lockFile = path.join(__dirname, '.botlock');
+if (fs.existsSync(lockFile)) {
+  console.log('❌ Бот уже запущен! Завершаем процесс...');
+  process.exit(0);
+}
+
+// Создаем lock файл
+fs.writeFileSync(lockFile, process.pid.toString());
+
+// Удаляем lock файл при завершении
+process.on('SIGINT', () => {
+  if (fs.existsSync(lockFile)) {
+    fs.unlinkSync(lockFile);
+  }
+  process.exit(0);
+});
+
+process.on('exit', () => {
+  if (fs.existsSync(lockFile)) {
+    fs.unlinkSync(lockFile);
+  }
+});
+
+// Инициализация Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// 🚨 long polling вместо webHook
+// Инициализация бота
 const bot = new TelegramBot(TOKEN, { polling: true });
 
 const ADMINS = [5234610042];
 let acceptingRequests = true;
 const userData = {};
-const pendingRejections = {}; // { adminId: { userId, checkNumber } }
+const pendingRejections = {};
 
 // ====== Utils ======
 const normalizeCheck = (s = '') => s.toString().trim().toUpperCase();
 
-async function checkExists(checkNumber) {
-  const threeMonthsAgo = new Date();
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+// Функция проверки подключения к Supabase
+async function testSupabaseConnection() {
+  try {
+    console.log('🔍 Проверка подключения к Supabase...');
 
-  const { data, error } = await supabase
-    .from('checks')
-    .select('id')
-    .eq('check_number', checkNumber)
-    .gte('created_at', threeMonthsAgo.toISOString());
+    const { data, error } = await supabase
+      .from('checks')
+      .select('count')
+      .limit(1);
 
-  if (error) {
-    console.error('Ошибка проверки чека:', error);
+    if (error) {
+      console.error('❌ Ошибка подключения к Supabase:');
+      console.error('Код ошибки:', error.code);
+      console.error('Сообщение:', error.message);
+      console.error('Детали:', error.details);
+      return false;
+    }
+
+    console.log('✅ Подключение к Supabase успешно');
+    return true;
+  } catch (error) {
+    console.error('❌ Неожиданная ошибка при подключении:');
+    console.error(error);
     return false;
   }
-  return data && data.length > 0;
 }
 
-async function saveCheck(checkNumber) {
-  const { data, error } = await supabase
-    .from('checks')
-    .insert([{ check_number: checkNumber }])
-    .select('id, check_number, created_at');
+// Проверка существования чека
+async function checkExists(checkNumber) {
+  try {
+    console.log(`🔍 Проверка существования чека: ${checkNumber}`);
 
-  if (error) {
-    console.error('❌ Ошибка сохранения чека:');
-    console.error('message:', error.message);
-    console.error('details:', error.details);
-    console.error('hint:', error.hint);
-    console.error('code:', error.code);
-    return { ok: false, duplicate: error.code === '23505' };
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
+    const { data, error } = await supabase
+      .from('checks')
+      .select('id, check_number, created_at')
+      .eq('check_number', checkNumber)
+      .gte('created_at', threeMonthsAgo.toISOString());
+
+    if (error) {
+      console.error('Ошибка проверки чека:', error);
+      return false;
+    }
+
+    const exists = data && data.length > 0;
+    console.log(`Чек ${checkNumber} ${exists ? 'существует' : 'не существует'}`);
+    return exists;
+  } catch (error) {
+    console.error('Ошибка при проверке чека:', error);
+    return false;
   }
-
-  console.log('✅ Чек сохранён:', data);
-  return { ok: true };
 }
 
+// Сохранение чека
+async function saveCheck(checkNumber) {
+  try {
+    console.log(`💾 Попытка сохранения чека: ${checkNumber}`);
+
+    const { data, error } = await supabase
+      .from('checks')
+      .insert([{
+        check_number: checkNumber,
+        created_at: new Date().toISOString()
+      }])
+      .select('id, check_number, created_at');
+
+    if (error) {
+      console.error('❌ Ошибка сохранения чека:');
+      console.error('Код ошибки:', error.code);
+      console.error('Сообщение:', error.message);
+      console.error('Детали:', error.details);
+      console.error('Хинт:', error.hint);
+
+      return {
+        ok: false,
+        duplicate: error.code === '23505',
+        error: error.message
+      };
+    }
+
+    console.log('✅ Чек успешно сохранён:', data);
+    return { ok: true, data: data[0] };
+  } catch (error) {
+    console.error('❌ Неожиданная ошибка при сохранении:');
+    console.error(error);
+    return { ok: false, error: error.message };
+  }
+}
 
 // ====== Show menu ======
 function showMenu(chatId) {
@@ -78,8 +160,34 @@ function showMenu(chatId) {
 
 // ====== Handlers ======
 bot.onText(/\/start/, (msg) => {
-  delete userData[msg.chat.id]; // Сброс состояния
+  delete userData[msg.chat.id];
   showMenu(msg.chat.id);
+});
+
+// Команда для тестирования базы данных
+bot.onText(/\/test_db/, async (msg) => {
+  const chatId = msg.chat.id;
+
+  try {
+    bot.sendMessage(chatId, '🧪 Тестируем подключение к базе данных...');
+
+    const connectionTest = await testSupabaseConnection();
+    if (!connectionTest) {
+      bot.sendMessage(chatId, '❌ Ошибка подключения к Supabase');
+      return;
+    }
+
+    const testCheck = 'TEST_' + Date.now();
+    const saveResult = await saveCheck(testCheck);
+
+    if (saveResult.ok) {
+      bot.sendMessage(chatId, `✅ Тест пройден успешно!\nСохранён чек: ${testCheck}`);
+    } else {
+      bot.sendMessage(chatId, `❌ Ошибка сохранения: ${saveResult.error}`);
+    }
+  } catch (error) {
+    bot.sendMessage(chatId, `❌ Критическая ошибка: ${error.message}`);
+  }
 });
 
 bot.on('message', async (msg) => {
@@ -128,6 +236,8 @@ bot.on('message', async (msg) => {
 
     if (step === 2) {
       const checkNumber = normalizeCheck(text);
+      console.log(`📋 Обработка чека: ${checkNumber} для пользователя: ${chatId}`);
+
       const exists = await checkExists(checkNumber);
       if (exists) {
         bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе! Введите другой номер:');
@@ -223,4 +333,22 @@ bot.on('callback_query', (query) => {
   }
 });
 
-console.log('🤖 Бот запущен (long polling)...');
+// Проверка подключения при старте
+testSupabaseConnection().then(success => {
+  if (!success) {
+    console.error('❌ Критическая ошибка: не удалось подключиться к Supabase');
+    process.exit(1);
+  }
+  console.log('🤖 Бот запущен (long polling)...');
+});
+
+// Обработка ошибок бота
+bot.on('error', (error) => {
+  console.error('❌ Ошибка Telegram Bot API:');
+  console.error(error);
+});
+
+bot.on('polling_error', (error) => {
+  console.error('❌ Ошибка polling:');
+  console.error(error);
+});
