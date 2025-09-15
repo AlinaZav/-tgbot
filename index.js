@@ -263,11 +263,6 @@ bot.on('message', async (msg) => {
       const checkNumber = normalizeCheck(text);
       console.log(`📋 Обработка чека: ${checkNumber} для пользователя: ${chatId}`);
 
-      // Валидация номера чека
-      if (!validateCheckNumber(checkNumber)) {
-        bot.sendMessage(chatId, '⛔ Неверный формат номера чека. Используйте только буквы, цифры и символы -_#. Длина от 3 до 50 символов.');
-        return;
-      }
 
       // Проверка подключения
       const isConnected = await ensureConnection();
