@@ -52,10 +52,23 @@ const pendingRejections = {};
 // ====== Utils ======
 const normalizeCheck = (s = '') => s.toString().trim().toUpperCase();
 
+function validateCheckNumber(checkNumber) {
+  // Минимальная длина 3 символа, максимальная 50
+  if (!checkNumber || checkNumber.length < 3 || checkNumber.length > 50) {
+    return false;
+  }
+
+  // Разрешаем буквы, цифры и некоторые специальные символы
+  const regex = /^[a-zA-Z0-9\-_#]+$/;
+  return regex.test(checkNumber);
+}
+
 // Функция проверки подключения к Supabase
 async function testSupabaseConnection() {
   try {
     console.log('🔍 Проверка подключения к Supabase...');
+    console.log('Supabase URL:', SUPABASE_URL);
+    console.log('Supabase Key length:', SUPABASE_KEY ? SUPABASE_KEY.length : 'NULL');
 
     const { data, error } = await supabase
       .from('checks')
@@ -64,6 +77,7 @@ async function testSupabaseConnection() {
 
     if (error) {
       console.error('❌ Ошибка подключения к Supabase:');
+      console.error('Полная ошибка:', JSON.stringify(error, null, 2));
       console.error('Код ошибки:', error.code);
       console.error('Сообщение:', error.message);
       console.error('Детали:', error.details);
@@ -74,7 +88,7 @@ async function testSupabaseConnection() {
     return true;
   } catch (error) {
     console.error('❌ Неожиданная ошибка при подключении:');
-    console.error(error);
+    console.error('Stack:', error.stack);
     return false;
   }
 }
@@ -94,7 +108,7 @@ async function checkExists(checkNumber) {
       .gte('created_at', threeMonthsAgo.toISOString());
 
     if (error) {
-      console.error('Ошибка проверки чека:', error);
+      console.error('Ошибка проверки чека:', JSON.stringify(error, null, 2));
       return false;
     }
 
@@ -111,17 +125,24 @@ async function checkExists(checkNumber) {
 async function saveCheck(checkNumber) {
   try {
     console.log(`💾 Попытка сохранения чека: ${checkNumber}`);
+    console.log('Supabase URL:', SUPABASE_URL);
+    console.log('Supabase Key length:', SUPABASE_KEY ? SUPABASE_KEY.length : 'NULL');
+
+    const checkData = {
+      check_number: checkNumber,
+      created_at: new Date().toISOString()
+    };
+
+    console.log('Данные для сохранения:', checkData);
 
     const { data, error } = await supabase
       .from('checks')
-      .insert([{
-        check_number: checkNumber,
-        created_at: new Date().toISOString()
-      }])
+      .insert([checkData])
       .select('id, check_number, created_at');
 
     if (error) {
       console.error('❌ Ошибка сохранения чека:');
+      console.error('Полная ошибка:', JSON.stringify(error, null, 2));
       console.error('Код ошибки:', error.code);
       console.error('Сообщение:', error.message);
       console.error('Детали:', error.details);
@@ -138,8 +159,19 @@ async function saveCheck(checkNumber) {
     return { ok: true, data: data[0] };
   } catch (error) {
     console.error('❌ Неожиданная ошибка при сохранении:');
-    console.error(error);
+    console.error('Stack:', error.stack);
+    console.error('Full error:', error);
     return { ok: false, error: error.message };
+  }
+}
+
+// Проверка подключения перед запросом
+async function ensureConnection() {
+  try {
+    const { error } = await supabase.from('checks').select('count').limit(1);
+    return !error;
+  } catch {
+    return false;
   }
 }
 
@@ -190,6 +222,22 @@ bot.onText(/\/test_db/, async (msg) => {
   }
 });
 
+// Команда для отладки чека
+bot.onText(/\/debug_check (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const checkNumber = match[1];
+
+  bot.sendMessage(chatId, `🔍 Тестируем чек: ${checkNumber}`);
+
+  // Проверка существования
+  const exists = await checkExists(checkNumber);
+  bot.sendMessage(chatId, `Проверка существования: ${exists ? 'существует' : 'не существует'}`);
+
+  // Попытка сохранения
+  const result = await saveCheck(checkNumber);
+  bot.sendMessage(chatId, `Результат сохранения: ${JSON.stringify(result, null, 2)}`);
+});
+
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = (msg.text || '').trim();
@@ -238,6 +286,19 @@ bot.on('message', async (msg) => {
       const checkNumber = normalizeCheck(text);
       console.log(`📋 Обработка чека: ${checkNumber} для пользователя: ${chatId}`);
 
+      // Валидация номера чека
+      if (!validateCheckNumber(checkNumber)) {
+        bot.sendMessage(chatId, '⛔ Неверный формат номера чека. Используйте только буквы, цифры и символы -_#. Длина от 3 до 50 символов.');
+        return;
+      }
+
+      // Проверка подключения
+      const isConnected = await ensureConnection();
+      if (!isConnected) {
+        bot.sendMessage(chatId, '❌ Нет подключения к базе данных. Попробуйте позже.');
+        return;
+      }
+
       const exists = await checkExists(checkNumber);
       if (exists) {
         bot.sendMessage(chatId, '⛔ Такой чек уже есть в базе! Введите другой номер:');
@@ -251,6 +312,7 @@ bot.on('message', async (msg) => {
           return;
         }
         bot.sendMessage(chatId, '❌ Ошибка сохранения чека. Попробуйте позже.');
+        console.error('Ошибка сохранения:', saved.error);
         delete userData[chatId];
         return;
       }
