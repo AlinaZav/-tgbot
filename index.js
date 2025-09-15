@@ -14,29 +14,6 @@ if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
   process.exit(1);
 }
 
-// Проверка на уже запущенный процесс
-const lockFile = path.join(__dirname, '.botlock');
-if (fs.existsSync(lockFile)) {
-  console.log('❌ Бот уже запущен! Завершаем процесс...');
-  process.exit(0);
-}
-
-// Создаем lock файл
-fs.writeFileSync(lockFile, process.pid.toString());
-
-// Удаляем lock файл при завершении
-process.on('SIGINT', () => {
-  if (fs.existsSync(lockFile)) {
-    fs.unlinkSync(lockFile);
-  }
-  process.exit(0);
-});
-
-process.on('exit', () => {
-  if (fs.existsSync(lockFile)) {
-    fs.unlinkSync(lockFile);
-  }
-});
 
 // Инициализация Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
