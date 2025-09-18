@@ -86,7 +86,7 @@ bot.on('message', async (msg) => {
     const { userId, checkNumber, messageId } = pendingRejections[chatId];
 
     await bot.sendMessage(userId, `❌ Отказ по чеку №${checkNumber}. Причина: ${text}`);
-    await bot.sendMessage(chatId, `❌ Отказ зафиксирован по чеку №${checkNumber}`, {
+    await bot.sendMessage(chatId, `❌ Отказ по чеку №${checkNumber}`, {
       reply_to_message_id: messageId
     });
 
